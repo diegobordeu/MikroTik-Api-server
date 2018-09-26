@@ -27,7 +27,10 @@ function connect() {
   });
 }
 
-getInterfacesBPS().then(a => console.log(a)).catch(err => console.log(err));
+// getInterfacesBPS().then(a => console.log(a)).catch(err => console.log(err));
+//loginMacAddress('80:AD:16:E4:DA:DD').then(a => console.log(a, 'exito')).catch(err => console.log(err, 'fallo'));
+loginMacAddressBinding('80:AD:16:E4:DA:DD').then(a => console.log(a, 'exito')).catch(err => console.log(err, 'fallo'));
+
 // getUsersInfo().then(a => console.log(a)).catch(err => console.log(err));
 
 function getInterfacesBPS() {  // get bytes pear second
@@ -41,7 +44,7 @@ function getInterfacesBPS() {  // get bytes pear second
       ch.trap.subscribe(err =>{
         reject(err.data[0].value);
       });
-      ch.write('/interface/print');
+      ch.write('/interface/print',['=.proplist=fp-rx-byte,fp-tx-byte,name']);
     }).catch(err => {
       reject(err);
     });
@@ -54,13 +57,63 @@ function getUsersInfo() {  // get bytes in and out, seccion time, seccion time l
       const ch = conn.openChannel('listen');
       ch.closeOnDone(true);
       ch.done.subscribe(data => {
-      //  console.log(data.data);
         resolve(parseDataToJson(data.data));
       });
       ch.trap.subscribe(err =>{
         reject(err.data[0].value);
       });
       ch.write('/ip/hotspot/active/print', ['=.proplist=mac-address,uptime,session-time-left,bytes-in,bytes-out,login-by']);
+    }).catch(err => {
+      reject(err);
+    });
+  });
+}
+
+function loginMacAddressBinding(macAddress) {
+  return new Promise((resolve, reject) =>{
+    connect().then(conn => {
+      const ch = conn.openChannel();
+      ch.closeOnDone(true);
+      ch.done.subscribe(data => {
+        resolve(data);
+      });
+      ch.trap.subscribe(err =>{
+        reject(err.data[0].value);
+      });
+      ch.write('/ip/hotspot/ip-binding/add',
+      {
+        'comment':'test',
+        'disabled':'no',
+        'type': 'bypassed',
+        'mac-address': macAddress
+      });
+    }).catch(err => {
+      reject(err);
+    });
+  });
+}
+
+function loginMacAddress(macAddress){
+  return new Promise((resolve, reject) =>{
+    connect().then(conn => {
+      const ch = conn.openChannel();
+      ch.closeOnDone(true);
+      findHostIp(macAddress, conn).then(ip => {
+        ch.done.subscribe(data => {
+          resolve(data);
+        });
+        ch.trap.subscribe(err =>{
+          reject(err.data[0].value);
+        });
+        ch.write('/ip/hotspot/active/login',
+        {
+          'user':'admin', //TODO: change password pass=NODE_ENV_PROD.loginPass
+          'mac-address': macAddress,
+          'ip': ip
+        });
+      }).catch(err => {
+        reject(err);
+      });
     }).catch(err => {
       reject(err);
     });
@@ -79,6 +132,34 @@ function parseDataToJson(data) { // [{},{}.....{}]
     return response;
 }
 
+function findHostIp(macAddress, conn) {
+  return new Promise((resolve, reject) => {
+    const channel = conn.openChannel();
+    channel.closeOnDone(true);
+    channel.done.subscribe(data => {
+      const ip = getIpFromData(data.data, macAddress);
+      if(ip){
+        resolve(ip);
+      } else {
+        reject('Failed: Mac address not found in hotspot hosts list');
+      }
+    });
+    channel.trap.subscribe(err =>{
+      reject(err.data[0].value);
+    });
+    channel.write('/ip/hotspot/host/print');
+  });
+}
+
+function getIpFromData(data, macAddress) {
+  data = parseDataToJson(data);
+  for(let i = 0; i < data.length; i++ ) {
+    if(data[i]['mac-address'] === macAddress) {
+      return data[i].address;
+    }
+  }
+  return false;
+}
 
 // connect().then(function(conn) {
 //   var c1=conn.openChannel();
